@@ -1,0 +1,19 @@
+---
+# Project (namespace) to deploy into. Leave empty to use the project that
+# `oc login` / `oc project` currently points at (the Developer Sandbox
+# pre-creates "<username>-dev").
+openshift_namespace: ""
+
+app_name: fraud-shield
+
+# Repo root, relative to this playbook.
+source_dir: "{{ playbook_dir }}/.."
+manifest_dir: "{{ source_dir }}/deploy/openshift"
+
+# Database credentials. The password is read from the environment so it never
+# lands in git:   export DB_PASSWORD='...'
+db_user: fraudshield
+db_name: fraudshield
+db_password: "{{ lookup('ansible.builtin.env', 'DB_PASSWORD') }}"
+
+rollout_timeout: 300s

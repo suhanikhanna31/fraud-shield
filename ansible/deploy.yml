@@ -1,0 +1,103 @@
+---
+# Build the image in OpenShift and deploy Fraud Shield + PostgreSQL.
+#
+#   oc login --token=... --server=...        # Developer Sandbox login command
+#   export DB_PASSWORD='choose-something'
+#   cd ansible && ansible-playbook deploy.yml
+#
+# Idempotent: re-running rebuilds the image and rolls the Deployment.
+- name: Build and deploy Fraud Shield to OpenShift
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  tasks:
+    - name: Fail early if DB_PASSWORD is not set
+      ansible.builtin.assert:
+        that: db_password | length > 0
+        fail_msg: "Export DB_PASSWORD before running this playbook."
+        quiet: true
+
+    - name: Check the oc CLI is logged in
+      ansible.builtin.command: oc whoami
+      register: oc_whoami
+      changed_when: false
+      failed_when: oc_whoami.rc != 0
+
+    - name: Resolve target project
+      ansible.builtin.command: oc project -q
+      register: oc_project
+      changed_when: false
+      when: openshift_namespace | length == 0
+
+    - name: Record the namespace in use
+      ansible.builtin.set_fact:
+        target_ns: "{{ openshift_namespace if openshift_namespace | length > 0 else oc_project.stdout }}"
+
+    - name: Create or update the database Secret
+      # DATABASE_URL is assembled here (with the password URL-encoded) so
+      # passwords containing @ : / ? # are safe. Labelled so teardown finds it.
+      ansible.builtin.shell: |
+        oc create secret generic fraud-shield-db -n {{ target_ns }} \
+          --from-literal=POSTGRESQL_USER={{ db_user }} \
+          --from-literal=POSTGRESQL_PASSWORD="$DB_PASSWORD" \
+          --from-literal=POSTGRESQL_DATABASE={{ db_name }} \
+          --from-literal=DATABASE_URL="$DATABASE_URL" \
+          --dry-run=client -o yaml \
+        | oc label --local -f - app={{ app_name }} -o yaml \
+        | oc apply -n {{ target_ns }} -f -
+      environment:
+        DB_PASSWORD: "{{ db_password }}"
+        DATABASE_URL: >-
+          postgres://{{ db_user }}:{{ db_password | urlencode | replace('/', '%2F') }}@{{ app_name }}-postgres:5432/{{ db_name }}?sslmode=disable
+      no_log: true
+      register: secret_result
+      changed_when: "'created' in secret_result.stdout or 'configured' in secret_result.stdout"
+
+    - name: Apply ImageStream, BuildConfig, Postgres, Deployment, Service and Route
+      ansible.builtin.command: oc apply -k {{ manifest_dir }} -n {{ target_ns }}
+      register: apply_result
+      changed_when: "'created' in apply_result.stdout or 'configured' in apply_result.stdout"
+
+    - name: Build the image in-cluster from the local source tree
+      ansible.builtin.command: >
+        oc start-build {{ app_name }} -n {{ target_ns }}
+        --from-dir={{ source_dir }} --follow --wait
+      register: build_result
+      changed_when: true
+
+    - name: Wait for PostgreSQL to be ready
+      ansible.builtin.command: >
+        oc rollout status deployment/{{ app_name }}-postgres
+        -n {{ target_ns }} --timeout={{ rollout_timeout }}
+      changed_when: false
+
+    - name: Wait for the API rollout to finish
+      ansible.builtin.command: >
+        oc rollout status deployment/{{ app_name }}
+        -n {{ target_ns }} --timeout={{ rollout_timeout }}
+      changed_when: false
+
+    - name: Look up the public Route host
+      ansible.builtin.command: >
+        oc get route {{ app_name }} -n {{ target_ns }}
+        -o jsonpath={.spec.host}
+      register: route_host
+      changed_when: false
+
+    - name: Smoke-test /health through the Route
+      ansible.builtin.uri:
+        url: "https://{{ route_host.stdout }}/health"
+        status_code: 200
+        return_content: true
+      register: health
+      retries: 12
+      delay: 5
+      until: health.status == 200
+
+    - name: Report
+      ansible.builtin.debug:
+        msg:
+          - "Deployed to namespace: {{ target_ns }}"
+          - "URL: https://{{ route_host.stdout }}"
+          - "Health: {{ health.content | trim }}"

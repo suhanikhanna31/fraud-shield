@@ -1,0 +1,24 @@
+# Binary Docker build: `oc start-build fraud-shield --from-dir=. --follow`
+# uploads the working tree, builds it with the repo's Dockerfile inside the
+# cluster, and pushes the result to the fraud-shield ImageStream.
+apiVersion: build.openshift.io/v1
+kind: BuildConfig
+metadata:
+  name: fraud-shield
+  labels:
+    app: fraud-shield
+spec:
+  source:
+    type: Binary
+  strategy:
+    type: Docker
+    dockerStrategy:
+      dockerfilePath: Dockerfile
+  output:
+    to:
+      kind: ImageStreamTag
+      name: fraud-shield:latest
+  resources:
+    limits:
+      cpu: "1"
+      memory: 1Gi

@@ -1,0 +1,85 @@
+# In-cluster PostgreSQL for persisting flagged results. Uses the sclorg image,
+# which is built for OpenShift's random-UID restricted SCC (the upstream
+# `postgres` image is not).
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: fraud-shield-postgres
+  labels:
+    app: fraud-shield
+    component: postgres
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fraud-shield-postgres
+  labels:
+    app: fraud-shield
+    component: postgres
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate # RWO volume: never run two pods against it at once
+  selector:
+    matchLabels:
+      app: fraud-shield
+      component: postgres
+  template:
+    metadata:
+      labels:
+        app: fraud-shield
+        component: postgres
+    spec:
+      containers:
+        - name: postgres
+          image: quay.io/sclorg/postgresql-16-c9s:latest
+          ports:
+            - containerPort: 5432
+          envFrom:
+            - secretRef:
+                name: fraud-shield-db
+          readinessProbe:
+            exec:
+              command: ["/bin/sh", "-c", "pg_isready -U \"$POSTGRESQL_USER\" -d \"$POSTGRESQL_DATABASE\" -h 127.0.0.1"]
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: 5432
+            initialDelaySeconds: 30
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/pgsql/data
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: fraud-shield-postgres
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: fraud-shield-postgres
+  labels:
+    app: fraud-shield
+    component: postgres
+spec:
+  selector:
+    app: fraud-shield
+    component: postgres
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: 5432

@@ -1,0 +1,14 @@
+---
+# Remove everything deploy.yml created (including the Postgres volume).
+- name: Remove Fraud Shield from OpenShift
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Delete all labelled resources
+      ansible.builtin.command: >
+        oc delete all,pvc,secret,imagestream,buildconfig,route
+        -l app=fraud-shield
+        {{ ('-n ' ~ openshift_namespace) if openshift_namespace else '' }}
+      register: out
+      changed_when: "'deleted' in out.stdout"

@@ -1,0 +1,11 @@
+.git
+.github
+bin/
+deploy/
+ansible/
+*.md
+docker-compose.yml
+.env
+.env.local
+*.test
+*.out

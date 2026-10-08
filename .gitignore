@@ -1,0 +1,40 @@
+# Binaries
+/bin/
+/fraud-shield
+/server
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of go coverage tool
+*.out
+coverage.html
+
+# Go workspace files
+go.work
+go.work.sum
+
+# Dependency directories
+vendor/
+
+# Environment / secrets
+.env
+.env.local
+
+# Docker / Postgres local data
+pgdata/
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db

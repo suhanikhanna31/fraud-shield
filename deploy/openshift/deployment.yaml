@@ -1,0 +1,60 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fraud-shield
+  labels:
+    app: fraud-shield
+    component: api
+  annotations:
+    # Roll out automatically whenever a new image lands in the ImageStream.
+    image.openshift.io/triggers: >-
+      [{"from":{"kind":"ImageStreamTag","name":"fraud-shield:latest"},
+        "fieldPath":"spec.template.spec.containers[?(@.name==\"fraud-shield\")].image"}]
+spec:
+  # NOTE: velocity + union-find state is per-process (see README), so keep a
+  # single replica until that state moves to a shared store.
+  replicas: 1
+  selector:
+    matchLabels:
+      app: fraud-shield
+      component: api
+  template:
+    metadata:
+      labels:
+        app: fraud-shield
+        component: api
+    spec:
+      containers:
+        - name: fraud-shield
+          image: fraud-shield:latest
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: PORT
+              value: "8080"
+            # Full DSN lives in the Secret (password URL-encoded, sslmode=disable
+            # because the in-cluster Postgres has no TLS).
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef: {name: fraud-shield-db, key: DATABASE_URL}
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 20
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 25m
+              memory: 32Mi
+            limits:
+              cpu: 250m
+              memory: 128Mi
