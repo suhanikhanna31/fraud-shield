@@ -134,11 +134,48 @@ The Ansible playbook builds the image in-cluster from your working tree
 (BuildConfig → ImageStream), deploys PostgreSQL (PVC-backed) and the API, and
 smoke-tests `/health` through the Route.
 
+**Prerequisites (macOS):**
+
 ```bash
-# Prereqs: oc CLI logged in to the Sandbox ("Copy login command"), ansible-core
+brew install openshift-cli ansible
+```
+
+**Deploy:**
+
+```bash
+# 1. In the Sandbox web console: click your username (top right) ->
+#    "Copy login command" -> "Display Token", then paste the `oc login ...` line.
+oc login --token=<token> --server=<server>
+oc project            # confirm it is your "<username>-dev" project
+
+# 2. Pick a database password and deploy
 export DB_PASSWORD='choose-a-password'
 make deploy-openshift          # = cd ansible && ansible-playbook deploy.yml
-make teardown-openshift        # remove everything
+```
+
+The playbook prints the public URL at the end. You can also fetch it later:
+
+```bash
+oc get route fraud-shield -o jsonpath='https://{.spec.host}{"\n"}'
+```
+
+**Try it:**
+
+```bash
+URL=$(oc get route fraud-shield -o jsonpath='https://{.spec.host}')
+curl $URL/health
+curl -X POST $URL/v1/transactions/score \
+  -H "Content-Type: application/json" \
+  -d '{"account_id":"acc_123","amount":15000,"counter_party":"acc_999"}'
+```
+
+**Operate:**
+
+```bash
+oc get pods                            # status
+oc logs deployment/fraud-shield        # API logs
+make deploy-openshift                  # rebuild + redeploy after code changes
+make teardown-openshift                # remove everything, including the DB volume
 ```
 
 Set `openshift_namespace` in `ansible/group_vars/all.yml` to target a specific
@@ -146,6 +183,9 @@ project; by default the current `oc project` is used. Manifests live in
 `deploy/openshift/` and can also be applied manually with
 `oc apply -k deploy/openshift` (create the Secret first; see
 `secret.example.yaml`).
+
+The Sandbox may scale idle workloads down. If the URL stops responding, run
+`oc get pods`, and re-run `make deploy-openshift` if the pods are gone.
 
 ## Deploy to Render
 
